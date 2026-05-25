@@ -4,3 +4,4 @@ openpyxl
 streamlit-authenticator==0.3.3
 bcrypt
 fpdf2
+psycopg2-binary

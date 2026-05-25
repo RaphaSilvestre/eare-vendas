@@ -1,7 +1,7 @@
 import streamlit as st
 import streamlit_authenticator as stauth
 import pandas as pd
-import sqlite3
+import psycopg2
 import os
 from datetime import date, timedelta
 from fpdf import FPDF
@@ -153,12 +153,18 @@ DESC_REF = {
 COMISSAO = {"Direta": 0.0, "Arquiteto": 0.10, "Multimarcas": 0.40}
 TAXAS_AVISTA = {"Pix (0%)": 0.0, "Débito (1,39%)": 0.0139, "Crédito à vista (3,49%)": 0.0349}
 
-# ── BANCO DE DADOS ────────────────────────────────────────────────────────────
+# ── BANCO DE DADOS (Supabase / PostgreSQL) ────────────────────────────────────
+def get_conn():
+    """Retorna conexão com o Supabase. A URL fica nos Secrets do Streamlit."""
+    return psycopg2.connect(st.secrets["supabase_url"])
+
 def init_db():
-    conn = sqlite3.connect("pedidos.db")
-    conn.execute("""
+    """Garante que as tabelas existem — idempotente (pode rodar várias vezes)."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS pedidos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             data TEXT, vendedor TEXT, cliente TEXT, projeto TEXT, validade TEXT,
             tipo_venda TEXT, forma_pagamento TEXT, parcelas INTEGER,
             subtotal REAL, desconto_pct REAL, receita REAL,
@@ -167,37 +173,121 @@ def init_db():
             itens TEXT
         )
     """)
-    # Migração suave: adiciona coluna vendedor se não existir
-    try:
-        conn.execute("ALTER TABLE pedidos ADD COLUMN vendedor TEXT")
-        conn.commit()
-    except Exception:
-        pass
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS movimentos_estoque (
+            id SERIAL PRIMARY KEY,
+            data TEXT, pedido_id INTEGER,
+            colecao TEXT, movel TEXT, cor TEXT,
+            quantidade INTEGER,
+            tipo TEXT
+        )
+    """)
     conn.commit()
+    cur.close()
     conn.close()
 
 def salvar_pedido(dados):
-    conn = sqlite3.connect("pedidos.db")
-    conn.execute("""
+    """Insere pedido e retorna o ID gerado."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
         INSERT INTO pedidos (data,vendedor,cliente,projeto,validade,tipo_venda,
         forma_pagamento,parcelas,subtotal,desconto_pct,receita,cmv,imposto,
         taxa_pgto,comissao,frete,montagem,resultado,margem,itens)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        RETURNING id
     """, dados)
+    pedido_id = cur.fetchone()[0]
     conn.commit()
+    cur.close()
     conn.close()
+    return pedido_id
 
 def carregar_pedidos(filtro_vendedor=None):
-    conn = sqlite3.connect("pedidos.db")
+    conn = get_conn()
+    cur = conn.cursor()
     if filtro_vendedor:
-        df = pd.read_sql(
-            "SELECT * FROM pedidos WHERE vendedor=? ORDER BY id DESC",
-            conn, params=(filtro_vendedor,)
-        )
+        cur.execute("SELECT * FROM pedidos WHERE vendedor=%s ORDER BY id DESC", (filtro_vendedor,))
     else:
-        df = pd.read_sql("SELECT * FROM pedidos ORDER BY id DESC", conn)
+        cur.execute("SELECT * FROM pedidos ORDER BY id DESC")
+    rows = cur.fetchall()
+    cols = [d[0] for d in cur.description] if cur.description else []
+    cur.close()
     conn.close()
-    return df
+    return pd.DataFrame(rows, columns=cols)
+
+# ── ESTOQUE ───────────────────────────────────────────────────────────────────
+def calcular_estoque_produto(colecao, movel, cor, qtd_inicial):
+    """Retorna estoque disponível: inicial - saídas + entradas."""
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT
+                COALESCE(SUM(CASE WHEN tipo='saida'  THEN quantidade ELSE 0 END), 0) as saidas,
+                COALESCE(SUM(CASE WHEN tipo='entrada' THEN quantidade ELSE 0 END), 0) as entradas
+            FROM movimentos_estoque
+            WHERE colecao=%s AND movel=%s AND cor=%s
+        """, (colecao, movel, cor))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        saidas, entradas = row if row else (0, 0)
+        return max(0, int(qtd_inicial or 0) - int(saidas) + int(entradas))
+    except Exception:
+        return int(qtd_inicial or 0)
+
+def registrar_saidas_estoque(pedido_id, cart):
+    """Desconta itens vendidos do estoque."""
+    conn = get_conn()
+    cur = conn.cursor()
+    for it in cart:
+        cur.execute("""
+            INSERT INTO movimentos_estoque (data, pedido_id, colecao, movel, cor, quantidade, tipo)
+            VALUES (%s, %s, %s, %s, %s, %s, 'saida')
+        """, (str(date.today()), pedido_id, it['colecao'], it['movel'], it['cor'], it['qtd']))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def registrar_entrada_estoque(colecao, movel, cor, quantidade):
+    """Repõe estoque manualmente."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO movimentos_estoque (data, pedido_id, colecao, movel, cor, quantidade, tipo)
+        VALUES (%s, NULL, %s, %s, %s, %s, 'entrada')
+    """, (str(date.today()), colecao, movel, cor, quantidade))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def carregar_estoque_geral(df_prod):
+    """Retorna DataFrame com estoque atual de todos os produtos."""
+    if 'quantidade' not in df_prod.columns:
+        return pd.DataFrame()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT colecao, movel, cor,
+            SUM(CASE WHEN tipo='saida'   THEN quantidade ELSE 0 END) as saidas,
+            SUM(CASE WHEN tipo='entrada' THEN quantidade ELSE 0 END) as entradas
+        FROM movimentos_estoque
+        GROUP BY colecao, movel, cor
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    mov = pd.DataFrame(rows, columns=['colecao','movel','cor','saidas','entradas']) if rows else pd.DataFrame(columns=['colecao','movel','cor','saidas','entradas'])
+    df = df_prod[['area','colecao','movel','cor','quantidade']].copy()
+    df = df.merge(mov, on=['colecao','movel','cor'], how='left')
+    df['saidas']   = df['saidas'].fillna(0).astype(int)
+    df['entradas'] = df['entradas'].fillna(0).astype(int)
+    df['disponivel'] = (df['quantidade'] - df['saidas'] + df['entradas']).clip(lower=0)
+    df['status'] = df['disponivel'].apply(
+        lambda x: '🔴 Esgotado' if x == 0 else ('🟡 Baixo' if x <= 2 else '🟢 OK')
+    )
+    return df[['area','colecao','movel','cor','quantidade','saidas','entradas','disponivel','status']]
 
 # ── FUNÇÕES AUXILIARES ────────────────────────────────────────────────────────
 def fmt(v):
@@ -416,7 +506,10 @@ if "senha_dre_ok" not in st.session_state:
     st.session_state.senha_dre_ok = eh_gestor  # gestor entra com DRE já aberto
 
 # ── ABAS ──────────────────────────────────────────────────────────────────────
-aba = st.tabs(["📋 Novo Pedido", "📦 Histórico de Pedidos"])
+tabs_list = ["📋 Novo Pedido", "📦 Histórico de Pedidos"]
+if eh_gestor:
+    tabs_list.append("📊 Estoque")
+aba = st.tabs(tabs_list)
 
 with aba[0]:
 
@@ -474,24 +567,53 @@ with aba[0]:
         prod_sel = df_prod[mask].iloc[0].to_dict() if mask.any() else None
 
     if prod_sel:
+        # ── Verifica estoque ──────────────────────────────────────────────────
+        tem_estoque = 'quantidade' in df_prod.columns
+        estoque_atual = calcular_estoque_produto(
+            prod_sel['colecao'], prod_sel['movel'], prod_sel['cor'],
+            prod_sel.get('quantidade', 999)
+        ) if tem_estoque else 999
+
         i1, i2, i3 = st.columns([2, 2, 1])
         i1.text_input("Fornecedor (BP)", value=prod_sel["bp"], disabled=True)
         i2.text_input("Descrição", value=prod_sel["desc"], disabled=True)
-        qtd = i3.number_input("Qtd", min_value=1, value=1)
-        st.metric("Preço final (VL_VENDA_FINAL)", fmt(prod_sel["preco"]))
-        if st.button("➕ Adicionar ao pedido", type="primary"):
-            st.session_state.cart.append({
-                "colecao":    prod_sel["colecao"],
-                "movel":      prod_sel["movel"],
-                "cor":        prod_sel["cor"],
-                "qtd":        qtd,
-                "preco":      prod_sel["preco"],
-                "custo":      prod_sel["custo"],
-                "total":      prod_sel["preco"] * qtd,
-                "totalCusto": prod_sel["custo"] * qtd,
-            })
-            st.success(f"✅ {prod_sel['movel']} ({prod_sel['cor']}) adicionado!")
-            st.rerun()
+        qtd_max = max(1, estoque_atual)
+        qtd = i3.number_input("Qtd", min_value=1, max_value=qtd_max if tem_estoque else 999, value=1)
+
+        col_preco, col_est = st.columns([3, 1])
+        col_preco.metric("Preço final (VL_VENDA_FINAL)", fmt(prod_sel["preco"]))
+        if tem_estoque:
+            if estoque_atual <= 0:
+                col_est.error("Sem estoque")
+            elif estoque_atual <= 2:
+                col_est.warning(f"Estoque: {estoque_atual}")
+            else:
+                col_est.success(f"Estoque: {estoque_atual}")
+
+        sem_estoque = tem_estoque and estoque_atual <= 0
+        if sem_estoque:
+            st.error("⚠️ Produto esgotado — não é possível adicionar ao pedido.")
+        elif st.button("➕ Adicionar ao pedido", type="primary"):
+            # Checa se a qtd no carrinho + nova qtd não ultrapassa o estoque
+            no_cart = sum(it['qtd'] for it in st.session_state.cart
+                          if it['colecao'] == prod_sel['colecao']
+                          and it['movel'] == prod_sel['movel']
+                          and it['cor'] == prod_sel['cor'])
+            if tem_estoque and no_cart + qtd > estoque_atual:
+                st.error(f"Quantidade indisponível. Estoque livre: {estoque_atual - no_cart}")
+            else:
+                st.session_state.cart.append({
+                    "colecao":    prod_sel["colecao"],
+                    "movel":      prod_sel["movel"],
+                    "cor":        prod_sel["cor"],
+                    "qtd":        qtd,
+                    "preco":      prod_sel["preco"],
+                    "custo":      prod_sel["custo"],
+                    "total":      prod_sel["preco"] * qtd,
+                    "totalCusto": prod_sel["custo"] * qtd,
+                })
+                st.success(f"✅ {prod_sel['movel']} ({prod_sel['cor']}) adicionado!")
+                st.rerun()
 
     st.subheader("🛒 Itens do Pedido")
     if not st.session_state.cart:
@@ -647,7 +769,7 @@ with aba[0]:
             else:
                 import json
                 itens_json = json.dumps(st.session_state.cart)
-                salvar_pedido((
+                pedido_id = salvar_pedido((
                     str(date.today()), nome_user, nome_cliente, nome_projeto,
                     str(validade_dt), tipo_venda,
                     meio_pgto if modalidade == "À vista" else f"{parcelas}x",
@@ -657,12 +779,15 @@ with aba[0]:
                     res['v_canal'], frete, montagem,
                     res['resultado'], res['margem'] * 100, itens_json
                 ))
-                st.success(f"✅ Pedido de {nome_cliente} salvo com sucesso!")
+                # Desconta automaticamente do estoque
+                registrar_saidas_estoque(pedido_id, st.session_state.cart)
+                st.success(f"✅ Pedido de {nome_cliente} salvo e estoque atualizado!")
                 st.session_state.cart = []
                 st.rerun()
 
 with aba[1]:
     st.subheader("📦 Histórico de Pedidos")
+
 
     # Gestor vê todos; outros perfis veem só os próprios pedidos
     if eh_gestor:
@@ -691,3 +816,54 @@ with aba[1]:
         if "Desc %"         in df_show.columns: df_show["Desc %"]         = df_show["Desc %"].map(lambda x: f"{x:.1f}%")
         st.dataframe(df_show, use_container_width=True)
         st.metric("Total de pedidos", len(df_hist))
+
+# ── ABA ESTOQUE (só para gestores) ───────────────────────────────────────────
+if eh_gestor and len(aba) > 2:
+    with aba[2]:
+        st.subheader("📊 Controle de Estoque")
+
+        if 'quantidade' not in df_prod_global.columns:
+            st.warning("Adicione a coluna **quantidade** no arquivo `produtos.xlsx` para ativar o estoque.")
+            st.caption("Exemplo: coluna 'quantidade' com o número de unidades disponíveis para cada produto.")
+        else:
+            df_est = carregar_estoque_geral(df_prod_global)
+
+            # Métricas resumo
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total de produtos", len(df_est))
+            m2.metric("Itens disponíveis", int(df_est['disponivel'].sum()))
+            m3.metric("Produtos esgotados", int((df_est['disponivel'] == 0).sum()))
+
+            st.divider()
+
+            # Filtro de status
+            filtro_status = st.radio("Filtrar por status", ["Todos", "🟢 OK", "🟡 Baixo", "🔴 Esgotado"], horizontal=True)
+            df_view = df_est if filtro_status == "Todos" else df_est[df_est['status'] == filtro_status]
+
+            df_view = df_view.rename(columns={
+                'area': 'Área', 'colecao': 'Coleção', 'movel': 'Móvel', 'cor': 'Cor',
+                'quantidade': 'Inicial', 'saidas': 'Saídas', 'entradas': 'Entradas',
+                'disponivel': 'Disponível', 'status': 'Status'
+            })
+            st.dataframe(df_view, use_container_width=True)
+
+            st.divider()
+
+            # Formulário de reposição
+            st.subheader("➕ Repor Estoque")
+            with st.form("repor_estoque"):
+                r1, r2, r3, r4 = st.columns(4)
+                opcoes_col = [""] + sorted(df_prod_global["colecao"].unique().tolist())
+                rep_col = r1.selectbox("Coleção", opcoes_col)
+                opcoes_mov = [""] + sorted(df_prod_global[df_prod_global["colecao"] == rep_col]["movel"].unique().tolist()) if rep_col else [""]
+                rep_mov = r2.selectbox("Móvel", opcoes_mov)
+                opcoes_cor = [""] + sorted(df_prod_global[(df_prod_global["colecao"] == rep_col) & (df_prod_global["movel"] == rep_mov)]["cor"].unique().tolist()) if rep_mov else [""]
+                rep_cor = r3.selectbox("Cor", opcoes_cor)
+                rep_qtd = r4.number_input("Qtd a repor", min_value=1, value=1)
+                if st.form_submit_button("✅ Confirmar reposição", type="primary"):
+                    if rep_col and rep_mov and rep_cor:
+                        registrar_entrada_estoque(rep_col, rep_mov, rep_cor, rep_qtd)
+                        st.success(f"✅ {rep_qtd} unidade(s) de {rep_mov} ({rep_cor}) repostas!")
+                        st.rerun()
+                    else:
+                        st.error("Selecione coleção, móvel e cor.")
