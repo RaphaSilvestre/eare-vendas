@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit_authenticator as stauth
 import pandas as pd
 import sqlite3
 import os
@@ -6,31 +7,78 @@ from datetime import date, timedelta
 
 st.set_page_config(page_title="EARE — Sistema de Pedidos", layout="wide")
 
-# ── 1. LOGO DA EMPRESA ───────────────────────────────────────────────────────
-# Coloque o arquivo "logo.png" na mesma pasta do app.py e faça commit no GitHub.
+# ── AUTENTICAÇÃO ─────────────────────────────────────────────────────────────
+# Usuários e senhas ficam no Streamlit Cloud: Settings > Secrets
+# Perfis: "gestor" vê tudo | "multimarcas" só vê canal Multimarcas
+
+credentials = {
+    "usernames": {
+        "raphael": {
+            "name": "Raphael",
+            "password": st.secrets["senha_raphael"],
+        },
+        "nath": {
+            "name": "Nath",
+            "password": st.secrets["senha_nath"],
+        },
+        "luca": {
+            "name": "Luca",
+            "password": st.secrets["senha_luca"],
+        },
+    }
+}
+
+PERFIS = {
+    "raphael": "gestor",
+    "nath":    "gestor",
+    "luca":    "multimarcas",
+}
+
+authenticator = stauth.Authenticate(
+    credentials,
+    "eare_auth",          # nome do cookie
+    "eare_chave_2026",    # chave secreta do cookie
+    30,                   # dias para expirar
+)
+
+authenticator.login()
+
+if st.session_state.get("authentication_status") is False:
+    st.error("Usuário ou senha incorretos.")
+    st.stop()
+
+if st.session_state.get("authentication_status") is None:
+    st.warning("Por favor, faça login para acessar o sistema.")
+    st.stop()
+
+# ── A partir daqui o usuário está autenticado ────────────────────────────────
+usuario    = st.session_state["username"]
+nome_user  = st.session_state["name"]
+perfil     = PERFIS.get(usuario, "vendedor")
+eh_gestor  = perfil == "gestor"
+
+# ── LOGO E TÍTULO ────────────────────────────────────────────────────────────
 if os.path.exists("logo.png"):
     col_logo, col_titulo = st.columns([1, 5])
     with col_logo:
         st.image("logo.png", width=180)
     with col_titulo:
         st.title("🪑 EARE — Sistema de Pedidos")
+        st.caption(f"Olá, **{nome_user}** · Perfil: `{perfil}`")
 else:
     st.title("🪑 EARE — Sistema de Pedidos")
+    st.caption(f"Olá, **{nome_user}** · Perfil: `{perfil}`")
 
-# ── 2. SENHA DO DRE ──────────────────────────────────────────────────────────
-# No Streamlit Cloud: vá em Settings > Secrets e adicione:
-#   senha_dre = "sua_senha_aqui"
-# Localmente: usa a senha padrão abaixo.
+# Botão de logout na barra lateral
+authenticator.logout("Sair", "sidebar")
+
+# ── SENHA DO DRE (só pede se não for gestor) ──────────────────────────────────
 try:
     SENHA_DRE = st.secrets["senha_dre"]
 except Exception:
-    SENHA_DRE = "eare2024"   # senha padrão para testes locais
+    SENHA_DRE = "eare2024"
 
-# ── 3. PRODUTOS VIA EXCEL ────────────────────────────────────────────────────
-# Coloque "produtos.xlsx" na mesma pasta do app.py.
-# Execute "gerar_produtos_excel.py" UMA VEZ para criar o arquivo inicial.
-# Depois edite o Excel normalmente e faça commit no GitHub.
-
+# ── PRODUTOS VIA EXCEL ────────────────────────────────────────────────────────
 PRODUTOS_FALLBACK = [
     {"area":"Interna","colecao":"Taquara","movel":"Mesa Centro","cor":"amber","bp":"Antares coffee table","desc":"mesa de centro","preco":3870,"custo":851.28},
     {"area":"Interna","colecao":"Taquara","movel":"Aparador","cor":"amber","bp":"Antares console table","desc":"aparador","preco":3110,"custo":596.47},
@@ -83,17 +131,19 @@ PRODUTOS_FALLBACK = [
     {"area":"Externa","colecao":"Nadinha","movel":"Mesa","cor":"—","bp":"ET Table","desc":"mesa","preco":3120,"custo":695.83},
 ]
 
-# Tenta carregar do Excel; se não encontrar, usa a lista acima como fallback.
-# Analogia SQL: é como um SELECT * FROM produtos — você só edita o arquivo,
-# não precisa mexer no código para alterar preços!
 try:
     df_prod_global = pd.read_excel("produtos.xlsx")
     fonte_produtos = "📄 Excel"
 except Exception:
     df_prod_global = pd.DataFrame(PRODUTOS_FALLBACK)
-    fonte_produtos = "📋 Código (produtos.xlsx não encontrado)"
+    fonte_produtos = "📋 Código (fallback)"
 
-# ── TABELAS DE NEGÓCIO ───────────────────────────────────────────────────────
+# ── TABELAS DE NEGÓCIO ────────────────────────────────────────────────────────
+CANAIS_POR_PERFIL = {
+    "gestor":      ["Direta", "Arquiteto", "Multimarcas"],
+    "multimarcas": ["Multimarcas"],
+}
+
 DESC_REF = {
     "Direta":     {"À vista": 0.15, "A prazo": 0.07},
     "Arquiteto":  {"À vista": 0.10, "A prazo": 0.05},
@@ -102,13 +152,13 @@ DESC_REF = {
 COMISSAO = {"Direta": 0.0, "Arquiteto": 0.10, "Multimarcas": 0.40}
 TAXAS_AVISTA = {"Pix (0%)": 0.0, "Débito (1,39%)": 0.0139, "Crédito à vista (3,49%)": 0.0349}
 
-# ── BANCO DE DADOS LOCAL ─────────────────────────────────────────────────────
+# ── BANCO DE DADOS ────────────────────────────────────────────────────────────
 def init_db():
     conn = sqlite3.connect("pedidos.db")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS pedidos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            data TEXT, cliente TEXT, projeto TEXT, validade TEXT,
+            data TEXT, vendedor TEXT, cliente TEXT, projeto TEXT, validade TEXT,
             tipo_venda TEXT, forma_pagamento TEXT, parcelas INTEGER,
             subtotal REAL, desconto_pct REAL, receita REAL,
             cmv REAL, imposto REAL, taxa_pgto REAL, comissao REAL,
@@ -116,27 +166,39 @@ def init_db():
             itens TEXT
         )
     """)
+    # Migração suave: adiciona coluna vendedor se não existir
+    try:
+        conn.execute("ALTER TABLE pedidos ADD COLUMN vendedor TEXT")
+        conn.commit()
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
 def salvar_pedido(dados):
     conn = sqlite3.connect("pedidos.db")
     conn.execute("""
-        INSERT INTO pedidos (data,cliente,projeto,validade,tipo_venda,forma_pagamento,
-        parcelas,subtotal,desconto_pct,receita,cmv,imposto,taxa_pgto,comissao,
-        frete,montagem,resultado,margem,itens)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO pedidos (data,vendedor,cliente,projeto,validade,tipo_venda,
+        forma_pagamento,parcelas,subtotal,desconto_pct,receita,cmv,imposto,
+        taxa_pgto,comissao,frete,montagem,resultado,margem,itens)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, dados)
     conn.commit()
     conn.close()
 
-def carregar_pedidos():
+def carregar_pedidos(filtro_vendedor=None):
     conn = sqlite3.connect("pedidos.db")
-    df = pd.read_sql("SELECT * FROM pedidos ORDER BY id DESC", conn)
+    if filtro_vendedor:
+        df = pd.read_sql(
+            "SELECT * FROM pedidos WHERE vendedor=? ORDER BY id DESC",
+            conn, params=(filtro_vendedor,)
+        )
+    else:
+        df = pd.read_sql("SELECT * FROM pedidos ORDER BY id DESC", conn)
     conn.close()
     return df
 
-# ── FUNÇÕES AUXILIARES ───────────────────────────────────────────────────────
+# ── FUNÇÕES AUXILIARES ────────────────────────────────────────────────────────
 def fmt(v):
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
@@ -161,15 +223,15 @@ def calcular(cart, tipo_venda, modalidade, meio_pgto, parcelas,
                 v_simples=v_simples, v_taxa=v_taxa, v_canal=v_canal,
                 v_fm=v_fm, resultado=resultado, margem=margem, taxa=taxa)
 
-# ── INICIALIZAÇÃO ────────────────────────────────────────────────────────────
+# ── INICIALIZAÇÃO ─────────────────────────────────────────────────────────────
 init_db()
 
 if "cart" not in st.session_state:
     st.session_state.cart = []
 if "senha_dre_ok" not in st.session_state:
-    st.session_state.senha_dre_ok = False
+    st.session_state.senha_dre_ok = eh_gestor  # gestor entra com DRE já aberto
 
-# ── ABAS PRINCIPAIS ──────────────────────────────────────────────────────────
+# ── ABAS ──────────────────────────────────────────────────────────────────────
 aba = st.tabs(["📋 Novo Pedido", "📦 Histórico de Pedidos"])
 
 with aba[0]:
@@ -191,8 +253,8 @@ with aba[0]:
     validade_dt  = date.today() + timedelta(days=validade_map[validade_sel])
 
     st.subheader("🏷️ Tipo de Venda")
-    tipo_venda = st.radio("", ["Direta", "Arquiteto", "Multimarcas"],
-                          horizontal=True,
+    canais_disponiveis = CANAIS_POR_PERFIL.get(perfil, ["Direta"])
+    tipo_venda = st.radio("", canais_disponiveis, horizontal=True,
                           help="Direta: sem comissão | Arquiteto: 10% | Multimarcas: 40%")
     if tipo_venda == "Arquiteto":
         st.caption("💡 Comissão de 10% incluída no cálculo do resultado.")
@@ -200,7 +262,7 @@ with aba[0]:
         st.caption("💡 Comissão de 40% incluída. Verifique a margem antes de dar desconto.")
 
     st.subheader("🔍 Busca de Produto")
-    df_prod = df_prod_global.copy()   # ← agora vem do Excel (ou fallback)
+    df_prod = df_prod_global.copy()
 
     b1, b2, b3, b4 = st.columns(4)
     areas    = [""] + sorted(df_prod["area"].unique().tolist())
@@ -293,7 +355,7 @@ with aba[0]:
         taxa_calc = 0.0279 + (parcelas - 1) * 0.0129
         p2.info(f"Taxa de {taxa_calc*100:.2f}% (14 dias corridos)")
 
-    # ── 2. DRE PROTEGIDO POR SENHA ───────────────────────────────────────────
+    # ── DRE ───────────────────────────────────────────────────────────────────
     if st.session_state.cart:
         res = calcular(st.session_state.cart, tipo_venda, modalidade, meio_pgto,
                        parcelas, desconto_pct, aliq_simples, frete, montagem)
@@ -301,10 +363,9 @@ with aba[0]:
         st.subheader("📊 DRE do Pedido")
 
         if not st.session_state.senha_dre_ok:
-            # ── Tela de bloqueio ──────────────────────────────────────────
             with st.container(border=True):
                 st.markdown("🔒 **Área restrita — Gestão**")
-                st.caption("O DRE completo (custos, margens e comissões) é visível apenas para gestores.")
+                st.caption("O DRE completo é visível apenas para gestores.")
                 col_inp, col_btn, _ = st.columns([2, 1, 3])
                 senha_input = col_inp.text_input("Senha", type="password",
                                                   label_visibility="collapsed",
@@ -316,7 +377,6 @@ with aba[0]:
                     else:
                         st.error("Senha incorreta.")
         else:
-            # ── DRE completo ──────────────────────────────────────────────
             col_dre, col_alert = st.columns([3, 2])
             with col_dre:
                 st.markdown(f"**(+) Receita bruta (tabela):** {fmt(res['bruto'])}")
@@ -340,11 +400,10 @@ with aba[0]:
                 st.progress(min(1.0, max(0.0, res['margem'] / meta_ll if meta_ll > 0 else 0)))
                 if modalidade == "A prazo":
                     st.info(f"💳 Parcela do cliente: **{fmt(res['receita']/parcelas)}/mês** ({parcelas}x)")
-
-                # Botão para fechar o DRE
-                if st.button("🔒 Fechar DRE"):
-                    st.session_state.senha_dre_ok = False
-                    st.rerun()
+                if not eh_gestor:
+                    if st.button("🔒 Fechar DRE"):
+                        st.session_state.senha_dre_ok = False
+                        st.rerun()
 
             with col_alert:
                 st.markdown("**🚦 Alertas**")
@@ -366,7 +425,7 @@ with aba[0]:
                 elif tipo_venda == "Arquiteto":
                     alertas.append(("💡", f"Comissão 10% = {fmt(res['v_canal'])}. Alinhe prazo do pagamento."))
                 if res['receita'] > 0 and res['v_fm'] / res['receita'] > 0.10:
-                    alertas.append(("🟡", f"Frete+montagem = {res['v_fm']/res['receita']*100:.1f}% da receita. Avalie valor mínimo."))
+                    alertas.append(("🟡", f"Frete+montagem = {res['v_fm']/res['receita']*100:.1f}% da receita."))
                 for icon, msg in alertas:
                     st.markdown(f"{icon} {msg}")
 
@@ -379,7 +438,7 @@ with aba[0]:
                 import json
                 itens_json = json.dumps(st.session_state.cart)
                 salvar_pedido((
-                    str(date.today()), nome_cliente, nome_projeto,
+                    str(date.today()), nome_user, nome_cliente, nome_projeto,
                     str(validade_dt), tipo_venda,
                     meio_pgto if modalidade == "À vista" else f"{parcelas}x",
                     parcelas if modalidade == "A prazo" else 1,
@@ -394,18 +453,31 @@ with aba[0]:
 
 with aba[1]:
     st.subheader("📦 Histórico de Pedidos")
-    df_hist = carregar_pedidos()
+
+    # Gestor vê todos; outros perfis veem só os próprios pedidos
+    if eh_gestor:
+        df_hist = carregar_pedidos()
+    else:
+        df_hist = carregar_pedidos(filtro_vendedor=nome_user)
+
     if df_hist.empty:
         st.info("Nenhum pedido salvo ainda.")
     else:
-        df_show = df_hist[["id", "data", "cliente", "projeto", "tipo_venda",
-                            "forma_pagamento", "receita", "desconto_pct",
-                            "resultado", "margem"]].copy()
-        df_show.columns = ["#", "Data", "Cliente", "Projeto", "Canal",
-                           "Pagamento", "Receita (R$)", "Desc %", "Resultado (R$)", "Margem %"]
-        df_show["Receita (R$)"]   = df_show["Receita (R$)"].map(lambda x: f"R$ {x:,.0f}")
-        df_show["Resultado (R$)"] = df_show["Resultado (R$)"].map(lambda x: f"R$ {x:,.0f}")
-        df_show["Margem %"]       = df_show["Margem %"].map(lambda x: f"{x:.1f}%")
-        df_show["Desc %"]         = df_show["Desc %"].map(lambda x: f"{x:.1f}%")
+        colunas = ["id", "data", "vendedor", "cliente", "projeto",
+                   "tipo_venda", "forma_pagamento", "receita", "desconto_pct",
+                   "resultado", "margem"]
+        colunas_existentes = [c for c in colunas if c in df_hist.columns]
+        df_show = df_hist[colunas_existentes].copy()
+        df_show.rename(columns={
+            "id": "#", "data": "Data", "vendedor": "Vendedor",
+            "cliente": "Cliente", "projeto": "Projeto",
+            "tipo_venda": "Canal", "forma_pagamento": "Pagamento",
+            "receita": "Receita (R$)", "desconto_pct": "Desc %",
+            "resultado": "Resultado (R$)", "margem": "Margem %"
+        }, inplace=True)
+        if "Receita (R$)"   in df_show.columns: df_show["Receita (R$)"]   = df_show["Receita (R$)"].map(lambda x: f"R$ {x:,.0f}")
+        if "Resultado (R$)" in df_show.columns: df_show["Resultado (R$)"] = df_show["Resultado (R$)"].map(lambda x: f"R$ {x:,.0f}")
+        if "Margem %"       in df_show.columns: df_show["Margem %"]       = df_show["Margem %"].map(lambda x: f"{x:.1f}%")
+        if "Desc %"         in df_show.columns: df_show["Desc %"]         = df_show["Desc %"].map(lambda x: f"{x:.1f}%")
         st.dataframe(df_show, use_container_width=True)
         st.metric("Total de pedidos", len(df_hist))
