@@ -4,6 +4,7 @@ import pandas as pd
 import sqlite3
 import os
 from datetime import date, timedelta
+from fpdf import FPDF
 
 st.set_page_config(page_title="EARE — Sistema de Pedidos", layout="wide")
 
@@ -223,6 +224,189 @@ def calcular(cart, tipo_venda, modalidade, meio_pgto, parcelas,
                 v_simples=v_simples, v_taxa=v_taxa, v_canal=v_canal,
                 v_fm=v_fm, resultado=resultado, margem=margem, taxa=taxa)
 
+# ── GERAÇÃO DE PDF ───────────────────────────────────────────────────────────
+def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
+                         tipo_venda, modalidade, meio_pgto, parcelas,
+                         desconto_pct, res, nome_vendedor):
+    """Gera PDF do orçamento — apenas informações para o cliente, sem custos."""
+
+    def s(text):
+        """Garante compatibilidade Latin-1 para fontes Helvetica do FPDF."""
+        return str(text).replace('—', '-').replace('–', '-').replace('’', "'")
+
+    def fmt_pdf(v):
+        return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=25)
+    pdf.add_page()
+    pdf.set_margins(20, 20, 20)
+
+    # ── CABEÇALHO ──────────────────────────────────────────────────────────────
+    logo_offset = 0
+    if os.path.exists("logo.png"):
+        pdf.image("logo.png", x=20, y=14, h=18)
+        logo_offset = 45
+
+    pdf.set_xy(20 + logo_offset, 14)
+    pdf.set_font("Helvetica", "B", 15)
+    pdf.set_text_color(40, 40, 40)
+    pdf.cell(0, 7, "EARE", ln=True)
+
+    pdf.set_x(20 + logo_offset)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(130, 130, 130)
+    pdf.cell(0, 5, "Solucoes em Bambu", ln=True)
+
+    # Título e datas no canto direito
+    pdf.set_xy(125, 14)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(40, 40, 40)
+    pdf.cell(65, 7, "ORCAMENTO", align="R", ln=True)
+
+    pdf.set_xy(125, 21)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(130, 130, 130)
+    pdf.cell(65, 4, f"Emitido: {date.today().strftime('%d/%m/%Y')}", align="R", ln=True)
+
+    val_fmt = validade_dt.strftime("%d/%m/%Y") if hasattr(validade_dt, "strftime") else str(validade_dt)
+    pdf.set_xy(125, 25)
+    pdf.cell(65, 4, f"Valido ate: {val_fmt}", align="R", ln=True)
+
+    # Linha divisória
+    pdf.set_y(36)
+    pdf.set_draw_color(200, 200, 200)
+    pdf.set_line_width(0.4)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(5)
+
+    # ── DADOS DO CLIENTE ───────────────────────────────────────────────────────
+    y0 = pdf.get_y()
+    pdf.set_fill_color(247, 247, 247)
+    pdf.rect(20, y0, 170, 20, "F")
+
+    pdf.set_xy(25, y0 + 3)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(28, 5, "CLIENTE")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(40, 40, 40)
+    pdf.cell(52, 5, s(nome_cliente))
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(28, 5, "PROJETO")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(40, 40, 40)
+    pdf.cell(0, 5, s(nome_projeto) if nome_projeto else "-", ln=True)
+
+    pdf.set_xy(25, y0 + 11)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(28, 5, "CANAL")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(40, 40, 40)
+    pdf.cell(52, 5, s(tipo_venda))
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(28, 5, "ATENDIMENTO")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(40, 40, 40)
+    pdf.cell(0, 5, s(nome_vendedor), ln=True)
+
+    pdf.ln(7)
+
+    # ── TABELA DE ITENS ────────────────────────────────────────────────────────
+    col_w   = [42, 38, 32, 12, 33, 33]
+    headers = ["Colecao", "Movel", "Cor", "Qtd", "Preco Unit.", "Total"]
+    aligns  = ["L", "L", "L", "C", "R", "R"]
+
+    # Cabeçalho da tabela
+    pdf.set_fill_color(40, 40, 40)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 8)
+    for h, w, a in zip(headers, col_w, aligns):
+        pdf.cell(w, 6, h, align=a, fill=True)
+    pdf.ln()
+
+    # Linhas dos produtos
+    pdf.set_text_color(40, 40, 40)
+    for idx, it in enumerate(cart):
+        if idx % 2 == 0:
+            pdf.set_fill_color(252, 252, 252)
+        else:
+            pdf.set_fill_color(255, 255, 255)
+        pdf.set_font("Helvetica", "", 8)
+        row = [s(it["colecao"]), s(it["movel"]), s(it["cor"]),
+               str(it["qtd"]), fmt_pdf(it["preco"]), fmt_pdf(it["total"])]
+        for val, w, a in zip(row, col_w, aligns):
+            pdf.cell(w, 5.5, val, align=a, fill=True)
+        pdf.ln()
+
+    # Linha de fechamento da tabela
+    pdf.set_draw_color(200, 200, 200)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(4)
+
+    # ── TOTAIS ─────────────────────────────────────────────────────────────────
+    tx = 120   # x inicial dos totais
+    lw = 35    # largura label
+    vw = 35    # largura valor
+
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(80, 80, 80)
+    pdf.set_x(tx)
+    pdf.cell(lw, 6, "Subtotal:", align="L")
+    pdf.cell(vw, 6, fmt_pdf(res["bruto"]), align="R", ln=True)
+
+    if desconto_pct > 0:
+        pdf.set_x(tx)
+        pdf.set_text_color(180, 50, 50)
+        pdf.cell(lw, 6, f"Desconto ({desconto_pct*100:.1f}%):", align="L")
+        pdf.cell(vw, 6, f"- {fmt_pdf(res['desc_val'])}", align="R", ln=True)
+        pdf.set_text_color(80, 80, 80)
+
+    pdf.set_draw_color(180, 180, 180)
+    pdf.line(tx, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(2)
+
+    pdf.set_x(tx)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(40, 40, 40)
+    pdf.cell(lw, 7, "TOTAL:", align="L")
+    pdf.cell(vw, 7, fmt_pdf(res["receita"]), align="R", ln=True)
+
+    pdf.ln(8)
+
+    # ── CONDIÇÕES DE PAGAMENTO ─────────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(40, 40, 40)
+    pdf.cell(0, 5, "Condicoes de Pagamento", ln=True)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(80, 80, 80)
+
+    if modalidade == "A prazo":
+        pgto_txt = f"A prazo: {parcelas}x de {fmt_pdf(res['receita'] / parcelas)}"
+    else:
+        pgto_txt = f"A vista  -  {s(meio_pgto)}"
+
+    pdf.cell(0, 5, pgto_txt, ln=True)
+
+    pdf.ln(10)
+
+    # ── RODAPÉ ─────────────────────────────────────────────────────────────────
+    pdf.set_draw_color(200, 200, 200)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "I", 7)
+    pdf.set_text_color(160, 160, 160)
+    pdf.multi_cell(0, 4,
+        f"Orcamento valido ate {val_fmt}. Valores sujeitos a alteracao apos esta data.\n"
+        "Para duvidas ou confirmacao do pedido, entre em contato com nossa equipe.",
+        align="C")
+
+    return bytes(pdf.output())
+
+
 # ── INICIALIZAÇÃO ─────────────────────────────────────────────────────────────
 init_db()
 
@@ -431,6 +615,32 @@ with aba[0]:
 
         st.divider()
         st.subheader("💾 Salvar Pedido")
+
+        # ── Botão de PDF ──────────────────────────────────────────────────────
+        if nome_cliente:
+            pdf_bytes = gerar_pdf_orcamento(
+                cart=st.session_state.cart,
+                nome_cliente=nome_cliente,
+                nome_projeto=nome_projeto,
+                validade_dt=validade_dt,
+                tipo_venda=tipo_venda,
+                modalidade=modalidade,
+                meio_pgto=meio_pgto,
+                parcelas=parcelas,
+                desconto_pct=desconto_pct,
+                res=res,
+                nome_vendedor=nome_user,
+            )
+            nome_arquivo = f"Orcamento_EARE_{nome_cliente.replace(' ', '_')}_{date.today()}.pdf"
+            st.download_button(
+                label="📄 Baixar Orçamento PDF",
+                data=pdf_bytes,
+                file_name=nome_arquivo,
+                mime="application/pdf",
+            )
+        else:
+            st.info("Preencha o nome do cliente para gerar o PDF.")
+
         if st.button("✅ Confirmar e Salvar Pedido", type="primary"):
             if not nome_cliente:
                 st.error("Informe o nome do cliente antes de salvar.")

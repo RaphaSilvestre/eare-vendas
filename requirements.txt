@@ -3,3 +3,4 @@ pandas
 openpyxl
 streamlit-authenticator==0.3.3
 bcrypt
+fpdf2
