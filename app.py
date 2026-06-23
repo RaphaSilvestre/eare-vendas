@@ -435,37 +435,37 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
     # Linha de fechamento da tabela
     pdf.set_draw_color(200, 200, 200)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
-    pdf.ln(4)
+    pdf.ln(2)
 
     # ── TOTAIS ─────────────────────────────────────────────────────────────────
-    tx = 115   # x inicial dos totais
-    lw = 35    # largura label
-    vw = 40    # largura valor (tx + lw + vw = 190)
+    tx = 112   # x inicial dos totais
+    lw = 33    # largura label
+    vw = 45    # largura valor (tx + lw + vw = 190)
 
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(80, 80, 80)
     pdf.set_x(tx)
-    pdf.cell(lw, 6, "Subtotal:", align="L")
-    pdf.cell(vw, 6, fmt_pdf(res["bruto"]), align="R", ln=True)
+    pdf.cell(lw, 5, "Subtotal:", align="L")
+    pdf.cell(vw, 5, fmt_pdf(res["bruto"]), align="R", ln=True)
 
     if desconto_pct > 0:
         pdf.set_x(tx)
         pdf.set_text_color(180, 50, 50)
-        pdf.cell(lw, 6, f"Desconto ({desconto_pct*100:.1f}%):", align="L")
-        pdf.cell(vw, 6, f"- {fmt_pdf(res['desc_val'])}", align="R", ln=True)
+        pdf.cell(lw, 5, f"Desconto ({desconto_pct*100:.1f}%):", align="L")
+        pdf.cell(vw, 5, f"- {fmt_pdf(res['desc_val'])}", align="R", ln=True)
         pdf.set_text_color(80, 80, 80)
 
     pdf.set_draw_color(180, 180, 180)
     pdf.line(tx, pdf.get_y(), 190, pdf.get_y())
-    pdf.ln(2)
+    pdf.ln(1)
 
     pdf.set_x(tx)
-    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(40, 40, 40)
-    pdf.cell(lw, 7, "TOTAL:", align="L")
-    pdf.cell(vw, 7, fmt_pdf(res["receita"]), align="R", ln=True)
+    pdf.cell(lw, 6, "TOTAL:", align="L")
+    pdf.cell(vw, 6, fmt_pdf(res["receita"]), align="R", ln=True)
 
-    pdf.ln(8)
+    pdf.ln(5)
 
     # ── CONDIÇÕES DE PAGAMENTO ─────────────────────────────────────────────────
     pdf.set_font("Helvetica", "B", 9)
