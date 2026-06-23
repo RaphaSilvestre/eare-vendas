@@ -346,7 +346,7 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
     pdf.set_x(20 + logo_offset)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(130, 130, 130)
-    pdf.cell(0, 5, "Solucoes em Bambu", ln=True)
+    pdf.cell(0, 5, "Moveis em Bambu", ln=True)
 
     # Título e datas no canto direito
     pdf.set_xy(125, 14)
@@ -438,9 +438,9 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
     pdf.ln(4)
 
     # ── TOTAIS ─────────────────────────────────────────────────────────────────
-    tx = 120   # x inicial dos totais
+    tx = 115   # x inicial dos totais
     lw = 35    # largura label
-    vw = 35    # largura valor
+    vw = 40    # largura valor (tx + lw + vw = 190)
 
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(80, 80, 80)
