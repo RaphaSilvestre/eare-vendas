@@ -477,7 +477,8 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
     if modalidade == "A prazo":
         pgto_txt = f"A prazo: {parcelas}x de {fmt_pdf(res['receita'] / parcelas)}"
     else:
-        pgto_txt = f"A vista  -  {s(meio_pgto)}"
+        meio_pgto_label = meio_pgto.split("(")[0].strip()
+        pgto_txt = f"A vista  -  {s(meio_pgto_label)}"
 
     pdf.cell(0, 5, pgto_txt, ln=True)
 
@@ -638,7 +639,14 @@ with aba[0]:
 
     st.subheader("💸 Desconto")
     d1, d2, d3 = st.columns(3)
-    desconto_pct = d1.number_input("Desconto (%)", min_value=0.0, max_value=100.0, step=0.5, value=0.0) / 100
+    bruto_atual = sum(it["total"] for it in st.session_state.cart)
+    tipo_desconto = d1.radio("Tipo de desconto", ["%", "R$"], horizontal=True)
+    if tipo_desconto == "%":
+        desc_input = d1.number_input("Desconto (%)", min_value=0.0, max_value=100.0, step=0.5, value=0.0)
+        desconto_pct = desc_input / 100
+    else:
+        desc_val_rs = d1.number_input("Desconto (R$)", min_value=0.0, max_value=float(bruto_atual) if bruto_atual > 0 else 0.0, step=10.0, value=0.0)
+        desconto_pct = desc_val_rs / bruto_atual if bruto_atual > 0 else 0.0
     modalidade   = d2.radio("Modalidade", ["À vista", "A prazo"], horizontal=True)
     ref_key      = "À vista" if modalidade == "À vista" else "A prazo"
     ref_desc     = DESC_REF[tipo_venda][ref_key]
@@ -646,7 +654,6 @@ with aba[0]:
         d2.warning(f"⚠️ Acima da referência ({ref_desc*100:.0f}% máx)")
     else:
         d2.success(f"✅ Dentro da referência ({ref_desc*100:.0f}% máx)")
-    bruto_atual = sum(it["total"] for it in st.session_state.cart)
     d3.metric("Subtotal com desconto", fmt(bruto_atual * (1 - desconto_pct)))
 
     st.subheader("💳 Forma de Pagamento")
