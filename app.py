@@ -434,13 +434,15 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
 
     # Linha de fechamento da tabela
     pdf.set_draw_color(200, 200, 200)
-    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.line(20, pdf.get_y(), 210, pdf.get_y())
     pdf.ln(2)
 
     # ── TOTAIS ─────────────────────────────────────────────────────────────────
-    tx = 112   # x inicial dos totais
-    lw = 33    # largura label
-    vw = 45    # largura valor (tx + lw + vw = 190)
+    # Alinha exatamente com as colunas da tabela:
+    # "Preco Unit." ocupa x=144→177, "Total" ocupa x=177→210
+    tx = 144   # início da col "Preco Unit."
+    lw = 33    # largura igual à col "Preco Unit."
+    vw = 33    # largura igual à col "Total"  →  tx+lw+vw = 210
 
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(80, 80, 80)
@@ -456,7 +458,7 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
         pdf.set_text_color(80, 80, 80)
 
     pdf.set_draw_color(180, 180, 180)
-    pdf.line(tx, pdf.get_y(), 190, pdf.get_y())
+    pdf.line(tx, pdf.get_y(), 210, pdf.get_y())
     pdf.ln(1)
 
     pdf.set_x(tx)
