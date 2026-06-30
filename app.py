@@ -160,7 +160,9 @@ def get_conn():
         host=st.secrets["db_host"],
         user=st.secrets["db_user"],
         password=st.secrets["db_password"],
-        database=st.secrets["db_name"]
+        database=st.secrets["db_name"],
+        charset="utf8mb4",
+        use_unicode=True
     )
 
 def init_db():
