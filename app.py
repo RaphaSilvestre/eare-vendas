@@ -195,19 +195,23 @@ def init_db():
 
 def salvar_pedido(dados):
     """Insere pedido e retorna o ID gerado."""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO pedidos (data,vendedor,cliente,projeto,validade,tipo_venda,
-        forma_pagamento,parcelas,subtotal,desconto_pct,receita,cmv,imposto,
-        taxa_pgto,comissao,frete,montagem,resultado,margem,itens)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-    """, dados)
-    pedido_id = cur.lastrowid
-    conn.commit()
-    cur.close()
-    conn.close()
-    return pedido_id
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO pedidos (data,vendedor,cliente,projeto,validade,tipo_venda,
+            forma_pagamento,parcelas,subtotal,desconto_pct,receita,cmv,imposto,
+            taxa_pgto,comissao,frete,montagem,resultado,margem,itens)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, dados)
+        pedido_id = cur.lastrowid
+        conn.commit()
+        cur.close()
+        conn.close()
+        return pedido_id
+    except Exception as e:
+        st.error(f"Erro MySQL detalhado: {type(e).__name__}: {e}")
+        raise
 
 def carregar_pedidos(filtro_vendedor=None):
     conn = get_conn()
