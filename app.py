@@ -345,24 +345,24 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
     # ── CABEÇALHO ──────────────────────────────────────────────────────────────
     logo_offset = 0
     if os.path.exists("logo.png"):
-        pdf.image("logo.png", x=20, y=14, h=18)
-        logo_offset = 45
+        pdf.image("logo.png", x=20, y=12, h=27)
+        logo_offset = 33
 
-    pdf.set_xy(20 + logo_offset, 14)
-    pdf.set_font("Helvetica", "B", 15)
+    pdf.set_xy(20 + logo_offset, 18)
+    pdf.set_font("Helvetica", "B", 11)
     pdf.set_text_color(40, 40, 40)
-    pdf.cell(0, 7, "EARE", ln=True)
+    pdf.cell(0, 6, "EARE", ln=True)
 
     pdf.set_x(20 + logo_offset)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(130, 130, 130)
-    pdf.cell(0, 5, "Moveis em Bambu", ln=True)
+    pdf.cell(0, 5, s("Soluções em Bambu"), ln=True)
 
     # Título e datas no canto direito
     pdf.set_xy(125, 14)
     pdf.set_font("Helvetica", "B", 13)
     pdf.set_text_color(40, 40, 40)
-    pdf.cell(65, 7, "ORCAMENTO", align="R", ln=True)
+    pdf.cell(65, 7, s("ORÇAMENTO"), align="R", ln=True)
 
     pdf.set_xy(125, 21)
     pdf.set_font("Helvetica", "", 8)
@@ -371,10 +371,10 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
 
     val_fmt = validade_dt.strftime("%d/%m/%Y") if hasattr(validade_dt, "strftime") else str(validade_dt)
     pdf.set_xy(125, 25)
-    pdf.cell(65, 4, f"Valido ate: {val_fmt}", align="R", ln=True)
+    pdf.cell(65, 4, s(f"Válido até: {val_fmt}"), align="R", ln=True)
 
     # Linha divisória
-    pdf.set_y(36)
+    pdf.set_y(44)
     pdf.set_draw_color(200, 200, 200)
     pdf.set_line_width(0.4)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
@@ -417,9 +417,9 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
 
     # ── TABELA DE ITENS ────────────────────────────────────────────────────────
     # col_w soma 170 → tabela de x=20 a x=190 (margem igual dos dois lados)
-    col_w   = [38, 34, 29, 11, 29, 29]
-    headers = ["Colecao", "Movel", "Cor", "Qtd", "Preco Unit.", "Total"]
-    aligns  = ["L", "L", "L", "C", "R", "R"]
+    col_w   = [26, 30, 32, 20, 28, 34]
+    headers = [s(h) for h in ["Coleção", "Móvel", "Cor", "Quantidade", "Preço Unit.", "Total"]]
+    aligns  = ["C", "C", "C", "C", "C", "C"]
 
     # Cabeçalho da tabela
     pdf.set_fill_color(40, 40, 40)
@@ -429,19 +429,36 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
         pdf.cell(w, 6, h, align=a, fill=True)
     pdf.ln()
 
-    # Linhas dos produtos
+    # Linhas dos produtos (com quebra automática de texto nas colunas de texto)
+    line_h = 4.2
     pdf.set_text_color(40, 40, 40)
     for idx, it in enumerate(cart):
-        if idx % 2 == 0:
-            pdf.set_fill_color(252, 252, 252)
-        else:
-            pdf.set_fill_color(255, 255, 255)
         pdf.set_font("Helvetica", "", 8)
-        row = [s(it["colecao"]), s(it["movel"]), s(it["cor"]),
-               str(it["qtd"]), fmt_pdf(it["preco"]), fmt_pdf(it["total"])]
-        for val, w, a in zip(row, col_w, aligns):
-            pdf.cell(w, 5.5, val, align=a, fill=True)
-        pdf.ln()
+        textos = [s(it["colecao"]), s(it["movel"]), s(it["cor"])]
+        n_lines = 1
+        for txt, w in zip(textos, col_w[:3]):
+            wrapped = pdf.multi_cell(w, line_h, txt, align="C", dry_run=True, output="LINES")
+            n_lines = max(n_lines, len(wrapped))
+        row_h = n_lines * line_h
+
+        y0 = pdf.get_y()
+        pdf.set_fill_color(252, 252, 252) if idx % 2 == 0 else pdf.set_fill_color(255, 255, 255)
+        pdf.rect(20, y0, 170, row_h, "F")
+
+        x = 20
+        for txt, w in zip(textos, col_w[:3]):
+            pdf.set_xy(x, y0)
+            pdf.multi_cell(w, line_h, txt, align="C")
+            x += w
+
+        y_centro = y0 + (row_h - line_h) / 2
+        valores = [str(it["qtd"]), fmt_pdf(it["preco"]), fmt_pdf(it["total"])]
+        for val, w in zip(valores, col_w[3:]):
+            pdf.set_xy(x, y_centro)
+            pdf.cell(w, line_h, val, align="C")
+            x += w
+
+        pdf.set_xy(20, y0 + row_h)
 
     # Linha de fechamento da tabela
     pdf.set_draw_color(200, 200, 200)
@@ -483,17 +500,11 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
     # ── CONDIÇÕES DE PAGAMENTO ─────────────────────────────────────────────────
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(40, 40, 40)
-    pdf.cell(0, 5, "Condicoes de Pagamento", ln=True)
+    pdf.cell(0, 5, s("Condições de Pagamento"), ln=True)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(80, 80, 80)
 
-    if modalidade == "A prazo":
-        pgto_txt = f"A prazo: {parcelas}x de {fmt_pdf(res['receita'] / parcelas)}"
-    else:
-        meio_pgto_label = meio_pgto.split("(")[0].strip()
-        pgto_txt = f"A vista  -  {s(meio_pgto_label)}"
-
-    pdf.cell(0, 5, pgto_txt, ln=True)
+    pdf.cell(0, 5, s("Pix, Cartão de Crédito, Boleto Bancário"), ln=True)
 
     pdf.ln(10)
 
@@ -504,8 +515,8 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
     pdf.set_font("Helvetica", "I", 7)
     pdf.set_text_color(160, 160, 160)
     pdf.multi_cell(0, 4,
-        f"Orcamento valido ate {val_fmt}. Valores sujeitos a alteracao apos esta data.\n"
-        "Para duvidas ou confirmacao do pedido, entre em contato com nossa equipe.",
+        s(f"Orçamento válido até {val_fmt}. Valores sujeitos a alteração após esta data.\n"
+        "Para dúvidas ou confirmação do pedido, entre em contato com nossa equipe."),
         align="C")
 
     return bytes(pdf.output())
