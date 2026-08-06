@@ -125,9 +125,9 @@ PRODUTOS_FALLBACK = [
     {"area":"Externa","colecao":"Pariana","movel":"Cadeira","cor":"—","bp":"Positano Chair","desc":"cadeira externa","preco":2600,"custo":742.54},
     {"area":"Externa","colecao":"Balcoa","movel":"Mesa redonda","cor":"—","bp":"Sunflower Table 98cm","desc":"mesa redonda","preco":5230,"custo":1147.60},
     {"area":"Externa","colecao":"Balcoa","movel":"Espreguiçadeira","cor":"—","bp":"Flexi Sun Lounger","desc":"espreguiçadeira","preco":11525,"custo":841.95},
-    {"area":"Externa","colecao":"Alvimia","movel":"Sofá 3 lugares","cor":"—","bp":"Koloni 3-seater Sofa","desc":"sofá 3 lugares","preco":13000,"custo":2282.08},
-    {"area":"Externa","colecao":"Alvimia","movel":"Poltrona Alvimea","cor":"Bambu Natural c/ estofado off white","bp":"Koloni Sofa","desc":"sofá 1 lugar","preco":5250,"custo":292.12},
-    {"area":"Externa","colecao":"Alvimia","movel":"Mesa de centro","cor":"—","bp":"Koloni Table","desc":"mesa de centro","preco":5270,"custo":887.08},
+    {"area":"Externa","colecao":"Alvimea","movel":"Sofá 3 lugares","cor":"—","bp":"Koloni 3-seater Sofa","desc":"sofá 3 lugares","preco":13000,"custo":2282.08},
+    {"area":"Externa","colecao":"Alvimea","movel":"Poltrona Alvimea","cor":"Bambu Natural c/ estofado off white","bp":"Koloni Sofa","desc":"sofá 1 lugar","preco":5250,"custo":292.12},
+    {"area":"Externa","colecao":"Alvimea","movel":"Mesa de centro","cor":"—","bp":"Koloni Table","desc":"mesa de centro","preco":5270,"custo":887.08},
     {"area":"Externa","colecao":"Nadinha","movel":"Cadeira","cor":"—","bp":"ET Chair","desc":"cadeira","preco":2650,"custo":689.46},
     {"area":"Externa","colecao":"Nadinha","movel":"Mesa","cor":"—","bp":"ET Table","desc":"mesa","preco":3120,"custo":695.83},
 ]
