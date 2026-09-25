@@ -523,7 +523,13 @@ def gerar_pdf_orcamento(cart, nome_cliente, nome_projeto, validade_dt,
 
 
 # ── INICIALIZAÇÃO ─────────────────────────────────────────────────────────────
-init_db()
+try:
+    init_db()
+except Exception as e:
+    st.error("🔧 DEBUG — erro real ao conectar no MySQL (remover depois de diagnosticar):")
+    st.exception(e)
+    st.write("errno:", getattr(e, "errno", None), "| sqlstate:", getattr(e, "sqlstate", None), "| msg:", getattr(e, "msg", None))
+    st.stop()
 
 if "cart" not in st.session_state:
     st.session_state.cart = []
